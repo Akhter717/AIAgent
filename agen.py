@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM  # Imported LLM class
 from crewai_tools import ScrapeWebsiteTool
 import re
 
@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# Custom CSS (same beautiful style as original)
+# Custom CSS for the UI styling
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap');
@@ -36,7 +36,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Sidebar
+# Sidebar for configuration
 with st.sidebar:
     st.markdown("### ⚙️ Configuration")
     groq_api_key = st.text_input("Groq API Key", type="password", value=os.getenv("GROQ_API_KEY", ""), placeholder="gsk_...")
@@ -53,13 +53,19 @@ def create_crew_agents(api_key, model_name):
     os.environ["GROQ_API_KEY"] = api_key
     scrape_tool = ScrapeWebsiteTool()
 
+    # Explicitly creating the LLM instance prevents the internal Pydantic/ImportError wrapper crash
+    groq_llm = LLM(
+        model=f"groq/{model_name}",
+        api_key=api_key
+    )
+
     element_finder = Agent(
         role="Senior QA Automation Engineer - Locator Expert",
         goal="Discover and prioritize the best locators (ID > Name > CSS > XPath) for all interactive elements.",
         backstory="12+ years in automation. Expert in robust locator strategies for dynamic UIs.",
         tools=[scrape_tool],
         verbose=True,
-        llm=f"groq/{model_name}"
+        llm=groq_llm
     )
 
     test_architect = Agent(
@@ -67,7 +73,7 @@ def create_crew_agents(api_key, model_name):
         goal="Generate clean, maintainable Java Selenium + TestNG tests using Page Object Model.",
         backstory="Expert in writing production-grade test automation frameworks.",
         verbose=True,
-        llm=f"groq/{model_name}"
+        llm=groq_llm
     )
 
     qa_reviewer = Agent(
@@ -75,7 +81,7 @@ def create_crew_agents(api_key, model_name):
         goal="Review and improve test quality, reliability, and best practices.",
         backstory="Strict QA leader focused on maintainability and robustness.",
         verbose=True,
-        llm=f"groq/{model_name}"
+        llm=groq_llm
     )
 
     return element_finder, test_architect, qa_reviewer
@@ -101,37 +107,40 @@ if run_btn:
     # Tasks
     with st.spinner("🕵️ Agent 1: Analyzing elements..."):
         task1 = Task(
-            description=f"Scrape and analyze {url_input}. Provide detailed element analysis with best locators.",
+            description=f"Scrape and analyze {url_input}. Provide detailed element analysis with best locators. Analyze up to {max_elements} critical elements.",
             agent=element_finder,
             expected_output="Structured element analysis with recommended locators."
         )
 
     with st.spinner("🏗️ Agent 2: Generating Java Selenium Tests..."):
+        wait_instruction = "Include explicit WebDriverWait commands." if include_waits else "Do not prioritize explicit waits."
+        testng_instruction = "Utilize TestNG annotations like @Test, @BeforeMethod, and Assertions." if include_testng else "Write using standard JUnit/Java main framework."
+        
         task2 = Task(
-            description=f"""Generate complete Java Selenium + TestNG code for {url_input}.
-            Use Page Object Model.
-            Include: Page class + Test class.
-            Cover: Positive flow, negative cases, edge cases.
-            Use explicit waits if enabled.""",
+            description=f"""Generate complete Java Selenium code for {url_input}.
+            Use the Page Object Model (POM) architecture.
+            Include separate code blocks for the Page class and the Test class.
+            Cover positive paths, negative test assertions, and boundary checks.
+            {wait_instruction}
+            {testng_instruction}""",
             agent=test_architect,
             context=[task1],
-            expected_output="Full Java code with Page Object and Test classes."
+            expected_output="Full Java code structured into Page Object and Test classes."
         )
 
     with st.spinner("👀 Agent 3: Reviewing & Polishing..."):
         task3 = Task(
-            description="Review the generated tests and provide the final improved version.",
+            description="Review the generated Java infrastructure for syntax accuracy, formatting cleanliness, locator robustness, and architectural soundness. Output the finalized source text.",
             agent=qa_reviewer,
             context=[task2],
-            expected_output="Final polished Java Selenium TestNG code."
+            expected_output="Final polished Java Selenium TestNG production-ready source code."
         )
 
     crew = Crew(
         agents=[element_finder, test_architect, qa_reviewer],
         tasks=[task1, task2, task3],
         process=Process.sequential,
-        verbose=2,
-        memory=True
+        verbose=True
     )
 
     with st.spinner("🤖 Running Multi-Agent Crew... (This may take 30-90 seconds)"):
@@ -141,15 +150,15 @@ if run_btn:
             st.success("✅ CrewAI Agents Completed Successfully!")
 
             # Display Results
-            tab1, tab2 = st.tabs(["📋 Element Analysis", "☕ Java Selenium Tests"])
+            tab1, tab2 = st.tabs(["📋 Detailed Output", "☕ Java Test Automation Code"])
 
             with tab1:
-                st.markdown("### Element Analysis (Agent 1 Output)")
-                st.markdown(f"<div class='code-block'>{result}</div>", unsafe_allow_html=True)  # First part usually has analysis
+                st.markdown("### Agent Execution Result Summary")
+                st.text_area("Log Output Summary", value=str(result), height=400)
 
             with tab2:
-                st.markdown("### Final Java + Selenium + TestNG Code")
-                st.markdown(f"<div class='code-block'>{result}</div>", unsafe_allow_html=True)
+                st.markdown("### Final Java + Selenium Framework Package")
+                st.code(str(result), language="java")
 
                 # Download button
                 st.download_button(
@@ -160,7 +169,7 @@ if run_btn:
                 )
 
         except Exception as e:
-            st.error(f"Error running CrewAI: {str(e)}")
+            st.error(f"Error running CrewAI engine: {str(e)}")
 
 else:
     st.info("Enter URL and click **Run CrewAI QA Agents** to start the multi-agent workflow.")
