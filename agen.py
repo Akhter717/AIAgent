@@ -488,7 +488,8 @@ def parse_locator_rows(agent1_text: str, page_elements: list) -> list:
                 loc      = f'By.cssSelector("{tag}.{cls}")'
                 loc_type = "CSS"
             elif attrs.get("href"):
-                loc      = f'By.cssSelector("a[href=\'{attrs[\"href\"][:40]}\']")'
+                href_val = attrs["href"][:40]
+                loc      = f'By.cssSelector("a[href=\'{href_val}\']")'
                 loc_type = "CSS"
             else:
                 loc      = f'By.xpath("//{tag}")'
